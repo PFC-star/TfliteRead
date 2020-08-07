@@ -126,7 +126,8 @@ void RearrangeWeightsToWinograd4x4To6x6Weights(
 
   for (int d = 0; d < src_weights.shape.o; ++d) {
     for (int s = 0; s < src_weights.shape.i; ++s) {
-      std::vector<float> in_vals(9);
+      std::vector<float> in_vals(9);    // 取出源权值tensor的3x3的一个kernel
+
       for (int y = 0; y < 3; ++y) {
         for (int x = 0; x < 3; ++x) {
           const int f_index = src_weights.shape.LinearIndex({d, y, x, s});

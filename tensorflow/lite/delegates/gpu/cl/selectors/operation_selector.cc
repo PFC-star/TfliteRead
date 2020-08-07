@@ -44,6 +44,7 @@ bool IsSuitableForWinograd4x4To6x6(const Convolution2DAttributes& attr,
   const int tiles_y = DivideRoundUp(dst_shape.h, 4);
   const int src_depth = DivideRoundUp(attr.weights.shape.i, 4);
   const int dst_depth = DivideRoundUp(attr.weights.shape.o, 4);
+  // printf("tiles_x: %d, tiles_y: %d, src_depth: %d, dst_depth: %d\n", tiles_x, tiles_y, src_depth, dst_depth);
   const bool suitable_attributes =
       attr.weights.shape.w == 3 && attr.weights.shape.h == 3 &&
       attr.dilations == HW(1, 1) && attr.strides == HW(1, 1);
@@ -66,12 +67,12 @@ absl::Status WinogradFromNode(const CreationContext& creation_context,
     return absl::UnimplementedError("No implementation for this case.");
   }
 
-  const int tiles_x = DivideRoundUp(output_shape.w, 4);
+  const int tiles_x = DivideRoundUp(output_shape.w, 4);  // output的h,w做大小为4*4的tile，其对应的input tile应该就是6*6
   const int tiles_y = DivideRoundUp(output_shape.h, 4);
-  const BHWC shape_0{input_shape.b, 36, tiles_x * tiles_y, input_shape.c};
-  const BHWC shape_1{input_shape.b, 36, tiles_x * tiles_y, output_shape.c};
-  TensorDescriptor td_0;
-  td_0.storage_type = SelectBestStorageType(
+  const BHWC shape_0{input_shape.b, 36, tiles_x * tiles_y, input_shape.c};  // 创建了一个shape为 [batch, 36, output_tiles, ic]的tensor
+  const BHWC shape_1{input_shape.b, 36, tiles_x * tiles_y, output_shape.c}; // 创建了一个shape为 [batch, 36, output_tiles, oc]的tensor
+  TensorDescriptor td_0;                                                    // 构建设置这两个tensor的descriptor
+  td_0.storage_type = SelectBestStorageType(                    
       *creation_context.context, *creation_context.device, shape_0,
       op_def.src_tensors[0].storage_type, op_def.src_tensors[0].data_type,
       op_def.src_tensors[0].layout);
@@ -84,11 +85,17 @@ absl::Status WinogradFromNode(const CreationContext& creation_context,
       op_def.src_tensors[0].layout);
   td_1.data_type = op_def.src_tensors[0].data_type;
   td_1.layout = op_def.src_tensors[0].layout;
-  gpu_subgraph->new_tensors = {{shape_0, td_0}, {shape_1, td_1}};
-  gpu_subgraph->operations.clear();
-  gpu_subgraph->operations.resize(3);
+  gpu_subgraph->new_tensors = {{shape_0, td_0}, {shape_1, td_1}};           // 将这两个新tensor放入subgraph中
+  gpu_subgraph->operations.clear();     
+  gpu_subgraph->operations.resize(3);                                       // 构建一个3个op的子图, wino_up(Winograd4x4To36) -> conv -> wino_post
 
-  OperationDef winograd_up_def;
+  // printf("%d, 36, %d, %d\n", input_shape.b, tiles_x*tiles_y, input_shape.c);
+  // printf("%d, 36, %d, %d\n", input_shape.b, tiles_x*tiles_y, output_shape.c);
+  // printf("%d, %d, %d\n", op_def.src_tensors[0].layout, op_def.src_tensors[0].data_type, op_def.src_tensors[0].storage_type);
+  // printf("%d, %d, %d\n", td_0.layout, td_0.data_type, td_0.storage_type);
+  // printf("%d, %d, %d\n", td_1.layout, td_1.data_type, td_1.storage_type);
+
+  OperationDef winograd_up_def;                                             // 分别设置这三个op
   winograd_up_def.precision = op_def.precision;
   winograd_up_def.src_tensors.push_back(op_def.src_tensors[0]);
   winograd_up_def.dst_tensors.push_back(td_0);

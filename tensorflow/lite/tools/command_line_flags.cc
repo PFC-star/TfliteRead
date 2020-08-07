@@ -173,6 +173,7 @@ std::string Flag::GetTypeName() const {
   std::unordered_map<std::string, int> processed_flags;
 
   // Stores indexes of flag_list in a sorted order.
+
   std::vector<int> sorted_idx(flag_list.size());
   std::iota(std::begin(sorted_idx), std::end(sorted_idx), 0);
   std::sort(sorted_idx.begin(), sorted_idx.end(), [&flag_list](int a, int b) {
@@ -212,6 +213,7 @@ std::string Flag::GetTypeName() const {
       }
       bool value_parsing_ok;
       flag.Parse(argv[positional_count], &value_parsing_ok);
+      
       if (!value_parsing_ok) {
         TFLITE_LOG(ERROR) << "Failed to parse positional flag: " << flag.name_;
         return false;

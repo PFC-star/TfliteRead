@@ -52,7 +52,7 @@ class BenchmarkTfLiteModel : public BenchmarkModel {
     std::string input_file_path;
   };
 
-  explicit BenchmarkTfLiteModel(BenchmarkParams params = DefaultParams());
+  explicit BenchmarkTfLiteModel(BenchmarkParams params = DefaultParams()); // 使用默认参数对BenchmarkTfLiteModel进行初始化
   ~BenchmarkTfLiteModel() override;
 
   std::vector<Flag> GetFlags() override;

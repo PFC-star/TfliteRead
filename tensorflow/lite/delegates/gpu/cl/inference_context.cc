@@ -261,13 +261,28 @@ absl::Status InferenceContext::ConvertOperations(
     const CreationContext& creation_context, const GraphFloat32& graph,
     ModelHints hints) {
   std::vector<Node*> graph_nodes = graph.nodes();
-  std::map<ValueId, int>
+  // for (int i = 0; i < graph_nodes.size(); ++i) {
+  //   const Node& node = *graph_nodes[i];
+  //   printf("# %s, ", node.operation.type.c_str());
+  //   auto inputs = graph.FindInputs(node.id);
+  //   printf("inputs: ");
+  //   for (auto input: inputs) {
+  //     printf("%d, ", input->id);
+  //   }
+  //   auto outputs = graph.FindOutputs(node.id);
+  //   printf("outputs: ");
+  //   for (auto output: outputs) {
+  //     printf("%d, ", output->id);
+  //   }
+  //   printf("\n");
+  // }
+  std::map<ValueId, int>      // 用于记录哪个Tensor的输出是被谁给用了
       tensor_usages;  // keeps latest index of operation that updated tensor
   for (const auto& input_id : input_ids_) {
     tensor_usages[input_id] = -1;  // so as inputs "updated" before operation 0,
                                    // we will mark them with -1
   }
-  for (int i = 0; i < graph_nodes.size(); ++i) {
+  for (int i = 0; i < graph_nodes.size(); ++i) {        // 对于每个Node找到对应输入与输出
     const Node& node = *graph_nodes[i];
     auto inputs = graph.FindInputs(node.id);
     auto outputs = graph.FindOutputs(node.id);
@@ -295,7 +310,7 @@ absl::Status InferenceContext::ConvertOperations(
       tensor_usages[out_id->id] = i;
     }
 
-    OperationDef op_def;
+    OperationDef op_def;   // 描述一个Tensor的src和dst
     op_def.precision = precision_;
     for (int j = 0; j < inputs.size(); ++j) {
       op_def.src_tensors.push_back(
@@ -305,7 +320,7 @@ absl::Status InferenceContext::ConvertOperations(
       op_def.dst_tensors.push_back(
           tensor_reserver_.Get(outputs[j]->id).descriptor);
     }
-    GPUOperationsSubgraph gpu_subgraph;
+    GPUOperationsSubgraph gpu_subgraph;       // 用上述信息创建一个只包含一个算子的subgraph
     RETURN_IF_ERROR(GPUOperationFromNode(creation_context, op_def, hints,
                                          inputs, outputs, node, &gpu_subgraph));
     std::unordered_map<int, ValueId> mapping_to_global_ids;
@@ -314,7 +329,7 @@ absl::Status InferenceContext::ConvertOperations(
       auto global_id = tensor_reserver_.Add({t.first, t.second});
       mapping_to_global_ids[j] = global_id;
     }
-    for (auto& gpu_op : gpu_subgraph.operations) {
+    for (auto& gpu_op : gpu_subgraph.operations) {    // 用GPUSubgraph创建CLNode
       CLNode cl_node;
       cl_node.operations.push_back(std::move(gpu_op.operation));
       cl_node.ranges.push_back(
@@ -338,7 +353,9 @@ absl::Status InferenceContext::ConvertOperations(
         }
       }
       cl_node.name = node.operation.type + " " + std::to_string(node.id);
+      // printf("%s, %d, %d\n", cl_node.name.c_str(), cl_node.inputs[0], cl_node.outputs[0]);
       nodes_.push_back(std::move(cl_node));
+      
     }
   }
 
@@ -352,13 +369,14 @@ void InferenceContext::Merge() {
   }
   for (int i = 0; i < nodes_.size(); ++i) {
     auto& node = nodes_[i];
+    // printf("%d, %s\n", i, node.name.c_str());
     for (const auto& out_id : node.outputs) {
       ready_tensors.insert(out_id);
     }
     if (node.outputs.size() != 1) {
       continue;
     }
-    std::vector<int> next_nodes;
+    std::vector<int> next_nodes; // 找到当前node可以连接到的node
     int link_index = 0;
     for (int j = i + 1; j < nodes_.size(); ++j) {
       for (int k = 0; k < nodes_[j].inputs.size(); ++k) {
@@ -371,10 +389,12 @@ void InferenceContext::Merge() {
     if (next_nodes.size() != 1 || link_index != 0) {
       continue;
     }
+
+    // 取出一个可以连接到的node
     auto& linkable_node = nodes_[next_nodes[0]];
     auto* elementwise =
         dynamic_cast<ElementwiseOperation*>(linkable_node.operations[0].get());
-    if (!elementwise || !elementwise->IsLinkable() ||
+    if (!elementwise || !elementwise->IsLinkable() ||   // 只有elementwise的算子可以连接
         linkable_node.outputs.size() != 1 ||
         !IsReady(ready_tensors, linkable_node)) {
       continue;
@@ -386,11 +406,14 @@ void InferenceContext::Merge() {
     if (original_dst_def != link_dst_def) {
       continue;
     }
+    // 将这两个node连接起来了
     MergeCLNodes(&linkable_node, &node);
-    nodes_.erase(nodes_.begin() + next_nodes[0]);
+    nodes_.erase(nodes_.begin() + next_nodes[0]); // 将连接到的node
     i -= 1;
   }
+  // printf("%d\n", nodes_.size());
   for (auto& node : nodes_) {
+    // printf("%s\n", node.name.c_str());
     for (int j = 1; j < node.operations.size(); ++j) {
       auto* elementwise =
           dynamic_cast<ElementwiseOperation*>(node.operations[j].get());
@@ -433,12 +456,20 @@ absl::Status InferenceContext::AllocateMemory(const CLDevice& device,
 
 absl::Status InferenceContext::AllocateMemoryForBuffers(const CLDevice& device,
                                                         CLContext* context) {
-  std::map<ValueId, int2> buffer_usages;
+  std::map<ValueId, int2> buffer_usages;  // 找到那些已经要用到buffer的tensor
+  // 如果一个tensor是使用image buffer或者buffer的，则将之加入buffer_usages中，表明其是使用buffer的
+  // usage是一个 tensorIdx -> (startOpIdx, endOpIdx)，表示这个tensor是最先由startOpIdx用到，最后由
+  // endOpIdx用到。这样我们可以知道各个tensor的生存期，这样子为复用内存优化创造了可能
   GetUsages(
       [](const TensorDescriptor& t) { return IsBufferBased(t.storage_type); },
       &buffer_usages);
+  
+  // printf("%d\n", buffer_usages.size());
+  // for (auto buffer_usage: buffer_usages) {
+  // printf("%d -> (%d, %d)\n", buffer_usage.first, buffer_usage.second.x, buffer_usage.second.y);
+  // }
 
-  std::vector<TensorUsageRecord<size_t>> buffer_usage_records;
+  std::vector<TensorUsageRecord<size_t>> buffer_usage_records;  // 对已经分配好的tensor做一个记录，获取各个tensor的bytes大小
   for (auto& usage : buffer_usages) {
     const auto& t = tensor_reserver_.Get(usage.first);
     const auto& shape = t.shape;
@@ -452,34 +483,58 @@ absl::Status InferenceContext::AllocateMemoryForBuffers(const CLDevice& device,
     buffer_usage_records.push_back({buffer_size,
                                     static_cast<TaskId>(usage.second.x),
                                     static_cast<TaskId>(usage.second.y)});
+    // printf("%d -> (%d, %d): %d\n", usage.first, usage.second.x, usage.second.y, buffer_size);                      
   }
 
-  ObjectsAssignment<size_t> buffer_assignment;
+  ObjectsAssignment<size_t> buffer_assignment;  // 获取一种内存分配的模式
   RETURN_IF_ERROR(AssignObjectsToTensors(
-      buffer_usage_records, MemoryStrategy::GREEDY_BEST, &buffer_assignment));
+      buffer_usage_records, MemoryStrategy::GREEDY_BEST, &buffer_assignment));  // 调用BestGreedy函数
 
+  // for (int i=0; i<buffer_assignment.object_ids.size(); i++)
+  //   printf("%d, ", buffer_assignment.object_ids[i]);
+  // printf("\n");
+  // for (int i=0; i<buffer_assignment.object_sizes.size(); i++)
+  //   printf("%d, ", buffer_assignment.object_sizes[i]);
+  // printf("\n");
+  
   shared_buffers_.resize(buffer_assignment.object_sizes.size());
-  for (int i = 0; i < buffer_assignment.object_sizes.size(); ++i) {
+  for (int i = 0; i < buffer_assignment.object_sizes.size(); ++i) { // 根据上面内存分配的策略实际的分配cl_mem，在此处就是两块
+  // printf("#############\n");
     RETURN_IF_ERROR(CreateReadWriteBuffer(buffer_assignment.object_sizes[i],
                                           context, &shared_buffers_[i]));
   }
 
+  // for (auto tmp: graph_ids_to_shared_buffer_tensors_) {
+  //   printf("%d, %d\n", tmp.first, tmp.second);
+  // }
+
+  // for (auto &tmp: shared_buffers_) {
+  //   printf("%d\n", tmp.GetMemoryPtr());
+  // }
+
   std::vector<bool> created_tensors(buffer_usage_records.size(), false);
   shared_buffer_tensors_.resize(buffer_usage_records.size());
-  for (auto& node : nodes_) {
-    auto tensors = GetCLNodeTensors(node);
-    for (auto& t : tensors) {
+  for (auto& node : nodes_) {       // 对于网络中每个CLNode
+    auto tensors = GetCLNodeTensors(node);    
+    for (auto& t : tensors) {       // 对于这个Node中的每个tensor，若没有分配CL内存则分配之
       if (!IsBufferBased(t.second.storage_type)) continue;
       const int tensor_index = graph_ids_to_shared_buffer_tensors_[t.first];
+
+      // printf("%d, %d\n", t.first, tensor_index); 
+
       if (created_tensors[tensor_index]) continue;
       const auto& shape = tensor_reserver_.Get(t.first).shape;
       const int buffer_index = buffer_assignment.object_ids[tensor_index];
-      RETURN_IF_ERROR(CreateSharedTensor(
-          *context, device, shared_buffers_[buffer_index].GetMemoryPtr(), shape,
+      RETURN_IF_ERROR(CreateSharedTensor(                                   // 因为中间tensor都是用buffer，所有这个函数没有任何影响
+          *context, shared_buffers_[buffer_index].GetMemoryPtr(), shape,
           t.second, &shared_buffer_tensors_[tensor_index]));
       created_tensors[tensor_index] = true;
     }
   }
+  //   for (auto &tmp: shared_buffer_tensors_) {
+  //   printf("%d\n", tmp.GetMemoryPtr());
+  // }
+
   return absl::OkStatus();
 }
 
@@ -512,6 +567,7 @@ absl::Status InferenceContext::AllocateMemoryForStrongShapes(
       graph_ids_to_strong_shape_tensors_[t.first] = id;
       const auto& it = strong_shape_tensors_.find(id);
       if (it == strong_shape_tensors_.end()) {
+        // printf("DDDDDDDDDDDDDDDDDDDDDD\n");
         RETURN_IF_ERROR(CreateTensor(*context, device, shape, t.second,
                                      &strong_shape_tensors_[id]));
       }
@@ -542,6 +598,7 @@ void InferenceContext::BindMemoryToOperations() {
 absl::Status InferenceContext::Compile(
     const CreationContext& creation_context) {
   for (auto& node : nodes_) {
+    // printf("%s\n", node.name.c_str());
     RETURN_IF_ERROR(node.operations[0]->Compile(creation_context));
   }
   return absl::OkStatus();

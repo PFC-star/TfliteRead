@@ -48,9 +48,9 @@ struct TensorUsageRecord {
 // Information about assignment of tensors to shared objects
 template <typename TensorSizeT>
 struct ObjectsAssignment {
-  // shared_object_ids_[i] is ID of shared object, that tensor i will be using.
+  // shared_object_ids_[i] is ID of shared object, that tensor i will be using. 有几个tensor长度就为几，object_ids[i]表示第i个tensor对应第i个memoryObj
   std::vector<size_t> object_ids;
-  // shared_object_sizes_[i] is a size of shared object with ID equal to i.
+  // shared_object_sizes_[i] is a size of shared object with ID equal to i.     第i个MemoryObj的size
   std::vector<TensorSizeT> object_sizes;
 };
 

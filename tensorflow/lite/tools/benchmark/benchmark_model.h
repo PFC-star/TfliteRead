@@ -196,7 +196,7 @@ class BenchmarkModel {
   virtual TfLiteStatus ValidateParams();
 
   TfLiteStatus ParseFlags(int argc, char** argv) {
-    return ParseFlags(&argc, argv);
+    return ParseFlags(&argc, argv); //和外层包着的这个函数相比, 第一个参数变成指针类型
   }
   virtual std::vector<Flag> GetFlags();
 

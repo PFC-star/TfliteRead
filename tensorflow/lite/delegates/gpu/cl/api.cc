@@ -532,6 +532,7 @@ class InferenceBuilderImpl : public InferenceBuilder {
   absl::Status Initialize(const InferenceOptions& options,
                           const InferenceEnvironmentOptions& env_options,
                           const GraphFloat32& graph) {
+
     context_ = absl::make_unique<InferenceContext>();
     InferenceContext::CreateInferenceInfo create_info;
     create_info.precision = GetPrecision(options);
@@ -789,6 +790,8 @@ class InferenceEnvironmentImpl : public InferenceEnvironment {
     }
 
     RETURN_IF_ERROR(RunGraphTransforms(&model));
+    auto graph = &model;
+    // printf("%d, %d, %d, %d\n", graph->nodes().size(), graph->values().size(), graph->inputs().size(), graph->outputs().size());
     auto builder_impl = absl::make_unique<InferenceBuilderImpl>(&environment_);
     RETURN_IF_ERROR(
         builder_impl->Initialize(resolved_options, options_, model));

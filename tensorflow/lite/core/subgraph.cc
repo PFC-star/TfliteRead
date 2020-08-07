@@ -241,9 +241,11 @@ void Subgraph::CleanupNode(int node_index) {
 TfLiteStatus Subgraph::ReplaceNodeSubsetsWithDelegateKernels(
     TfLiteContext* context, TfLiteRegistration registration,
     const TfLiteIntArray* nodes_to_replace, TfLiteDelegate* delegate) {
+
   return static_cast<Subgraph*>(context->impl_)
       ->ReplaceNodeSubsetsWithDelegateKernels(registration, nodes_to_replace,
                                               delegate);
+   
 }
 
 namespace {
@@ -357,7 +359,6 @@ TfLiteStatus Subgraph::ReplaceNodeSubsetsWithDelegateKernels(
   std::vector<NodeSubset> node_subsets;
   PartitionGraphIntoIndependentNodeSubsets(&info, nodes_to_replace,
                                            &node_subsets);
-
   TFLITE_LOG(
       tflite::TFLITE_LOG_INFO,
       "Replacing %d node(s) with delegate (%s) node, yielding %zu partitions.",
@@ -365,6 +366,7 @@ TfLiteStatus Subgraph::ReplaceNodeSubsetsWithDelegateKernels(
       registration.custom_name ? registration.custom_name : "unknown",
       node_subsets.size());
 
+  // 清空了原来的execution_plan_
   execution_plan_.clear();
 
   for (auto& node_subset : node_subsets) {
@@ -378,9 +380,8 @@ TfLiteStatus Subgraph::ReplaceNodeSubsetsWithDelegateKernels(
           execution_plan_.push_back(*it);
         }
         break;
-      case NodeSubset::kTfPartition: {
+      case NodeSubset::kTfPartition: {  //this way
         int node_index;
-
         TfLiteDelegateParams* params =
             CreateDelegateParams(delegate, node_subset);
         TF_LITE_ENSURE_STATUS(AddNodeWithParameters(
@@ -494,6 +495,8 @@ TfLiteStatus Subgraph::PreviewDelegatePartitioning(
     ++*num_partitions;
   }
 
+  // printf("%d\n", node_subsets[0].nodes.size());
+
   *partition_params_array = partitioning_preview_cache_.data();
   return kTfLiteOk;
 }
@@ -539,7 +542,7 @@ bool Subgraph::IsCancelled() {
 }
 
 void Subgraph::ReserveNodes(int count) {
-  nodes_and_registration_.reserve(count);
+  nodes_and_registration_.reserve(count);   // subgraph中对node的描述是一个<node, registration>的二元组, 此处先根据flatbuffermodel_中的ops来开辟空间
 }
 
 TfLiteStatus Subgraph::CheckTensorIndices(const char* label, const int* indices,
@@ -687,12 +690,13 @@ TfLiteStatus Subgraph::AddNodeWithParameters(
   TF_LITE_ENSURE_OK(
       &context_,
       CheckTensorIndices("node outputs", outputs.data(), outputs.size()));
-
   int new_node_index = nodes_and_registration_.size();
+
+  
   if (node_index) *node_index = new_node_index;
-  nodes_and_registration_.resize(nodes_and_registration_.size() + 1);
-  auto& node_and_reg = nodes_and_registration_.back();
-  TfLiteNode& node = node_and_reg.first;
+  nodes_and_registration_.resize(nodes_and_registration_.size() + 1);     // 在nodes_and_registration_最后又额外创建了一个空间存储那个node
+  auto& node_and_reg = nodes_and_registration_.back();                    // 这个Node对应的registration的输入输出是这个subset的输入输出
+  TfLiteNode& node = node_and_reg.first;                                  // 根据这个TfLiteDelegateParams以及那个registration来进行OpInit
   if (node.inputs) TfLiteIntArrayFree(node.inputs);
   if (node.outputs) TfLiteIntArrayFree(node.outputs);
   if (node.intermediates) TfLiteIntArrayFree(node.intermediates);
@@ -729,6 +733,7 @@ TfLiteStatus Subgraph::AddNodeWithParameters(
   node.delegate = nullptr;
   // Copying of registration is required to support unresolved custom ops.
   node_and_reg.second = *registration;
+  // 把这个新的Node放入execution_plan_
   execution_plan_.push_back(new_node_index);
   return kTfLiteOk;
 }
@@ -826,16 +831,17 @@ TfLiteStatus Subgraph::OpPrepare(const TfLiteRegistration& op_reg,
 }
 
 TfLiteStatus Subgraph::PrepareOpsStartingAt(
-    int first_execution_plan_index, int* last_execution_plan_index_prepared) {
+    int first_execution_plan_index, int* last_execution_plan_index_prepared) { 
   if (first_execution_plan_index == 0) {
     has_dynamic_tensors_ = false;
   }
-  for (int execution_plan_index = first_execution_plan_index;
+  for (int execution_plan_index = first_execution_plan_index;  // execution_plan_中是各个node的index拓扑排序之后的顺序，此处按拓扑序遍历所有节点
        execution_plan_index < execution_plan_.size(); execution_plan_index++) {
     int node_index = execution_plan_[execution_plan_index];
     TfLiteNode& node = nodes_and_registration_[node_index].first;
     const TfLiteRegistration& registration =
         nodes_and_registration_[node_index].second;
+        // printf("%s, %d, %d\n", registration.custom_name, registration.builtin_code, execution_plan_index);
     EnsureTensorsVectorCapacity();
     if (OpPrepare(registration, &node) != kTfLiteOk) {
       return ReportOpError(&context_, node, registration, node_index,
@@ -859,7 +865,8 @@ TfLiteStatus Subgraph::PrepareOpsAndTensors() {
   if (!memory_planner_) {
     memory_planner_.reset(new ArenaPlanner(
         &context_, std::unique_ptr<GraphInfo>(new InterpreterInfo(this)),
-        /*preserve_inputs=*/true, /*preserve_intermediates*/ false));
+        /*preserve_inputs=*/true, /*preserve_intermediates*/ false,
+        kDefaultTensorAlignment));
     memory_planner_->PlanAllocations();
   }
 
@@ -879,6 +886,7 @@ TfLiteStatus Subgraph::PrepareOpsAndTensors() {
 }
 
 TfLiteStatus Subgraph::Invoke() {
+  // printf("######################## Invoke Once ########################\n");
   if (!consistent_) {
     ReportError("Invoke called on model that is not consistent.");
     return kTfLiteError;
@@ -924,6 +932,8 @@ TfLiteStatus Subgraph::Invoke() {
     // need to be copied from Delegate buffer to raw memory, which is often not
     // needed. We may want to cache this in prepare to know if this needs to be
     // done for a node or not.
+
+    // 即考虑到存在不同算子在不同Delegate上, 这时需要确认不同算子之间是否需要Copy数据
     for (int i = 0; i < node.inputs->size; ++i) {
       int tensor_index = node.inputs->data[i];
       if (tensor_index == kTfLiteOptionalTensor) {
@@ -943,6 +953,7 @@ TfLiteStatus Subgraph::Invoke() {
     }
 
     EnsureTensorsVectorCapacity();
+    // printf("DDDDDDDDDDDDDDD %s\n", op_name);
     tensor_resized_since_op_invoke_ = false;
     if (OpInvoke(registration, &node) != kTfLiteOk) {
       return ReportOpError(&context_, node, registration, node_index,
@@ -1028,7 +1039,7 @@ void Subgraph::ReportError(const char* format, ...) {
 
 TfLiteStatus Subgraph::AddTensors(int tensors_to_add,
                                   int* first_new_tensor_index) {
-  const size_t base_index = tensors_.size();
+  const size_t base_index = tensors_.size();  // 初始时tensors_中没有元素
   if (first_new_tensor_index) *first_new_tensor_index = base_index;
   tensors_.resize(tensors_.size() + tensors_to_add);
   for (size_t i = base_index; i < tensors_.size(); i++) {
@@ -1303,7 +1314,6 @@ TfLiteStatus Subgraph::UndoAllDelegates() {
 
 TfLiteStatus Subgraph::RedoAllDelegates() {
   if (!delegates_undone_) return kTfLiteOk;
-
   delegates_undone_ = false;
   std::vector<TfLiteDelegate*> delegates_to_apply;
   delegates_applied_.swap(delegates_to_apply);
@@ -1348,22 +1358,24 @@ TfLiteStatus Subgraph::EnsureMemoryAllocations() {
 }
 
 TfLiteStatus Subgraph::ModifyGraphWithDelegate(TfLiteDelegate* delegate) {
+  // printf("%d, %d\n", tensors_.size(), execution_plan_.size());
+  // for (int i=0; i<tensors_.size(); i++) {
+  //   printf("%s: ", tensors_[i].name);
+  //   for (int j=0; j<tensors_[i].dims->size; j++)
+  //     printf("%d, ", tensors_[i].dims[j]);
+  //   printf("%d\n", tensors_[i].bytes);
+  // }
   TFLITE_SCOPED_TAGGED_DEFAULT_PROFILE(profiler_.get(),
                                        "ModifyGraphWithDelegate");
-
   // Restore delegation state if applicable.
   TF_LITE_ENSURE_STATUS(RedoAllDelegates());
-
   if (state_ == kStateInvokableAndImmutable) {
-    ReportError(
-        "ModifyGraphWithDelegate is disallowed when graph is immutable.");
+    ReportError("ModifyGraphWithDelegate is disallowed when graph is immutable.");
     return kTfLiteError;
   }
-
   if (!(delegate->flags & kTfLiteDelegateFlagsAllowDynamicTensors)) {
     int last_execution_plan_index_prepared;
-    TF_LITE_ENSURE_OK(&context_, PrepareOpsStartingAt(
-                                     0, &last_execution_plan_index_prepared));
+    TF_LITE_ENSURE_OK(&context_, PrepareOpsStartingAt(0, &last_execution_plan_index_prepared));
     if (has_dynamic_tensors_) {
       // Make sure that we are in a defined ready state before returning.
       // Plan and allocate tensors before returning.
@@ -1386,8 +1398,8 @@ TfLiteStatus Subgraph::ModifyGraphWithDelegate(TfLiteDelegate* delegate) {
 
   // TODO(aselle): Consider if it is worth storing pointers to delegates.
   // Setup additional context interface.
+  
   SwitchToDelegateContext();
-
   auto reset_delegation_if_not_ok = [this](TfLiteStatus status) {
     if (status != kTfLiteOk) {
       TF_LITE_ENSURE_STATUS(RemoveAllDelegates());
@@ -1398,8 +1410,14 @@ TfLiteStatus Subgraph::ModifyGraphWithDelegate(TfLiteDelegate* delegate) {
     }
     return kTfLiteOk;
   };
-
   TfLiteStatus status = delegate->Prepare(&context_, delegate);
+  // printf("%d %d\n", execution_plan_.size(), execution_plan_[0]);
+  // int cnt = 0;
+  // for(auto nar: nodes_and_registration_) {
+  //   auto node = nar.first;
+  //   auto reg = nar.second;
+  //   printf("%d %d %s\n", cnt++, reg.builtin_code, reg.custom_name);
+  // }
 
   // Remove additional context info.
   SwitchToKernelContext();

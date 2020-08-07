@@ -123,11 +123,13 @@ absl::Status SelectConvolutionWinogradMali(
     const CreationContext& creation_context, const OperationDef& op_def,
     std::unique_ptr<GPUOperation>* ptr) {
   if (op_def.src_tensors[0].storage_type == TensorStorageType::BUFFER) {
+    // printf("sdasdasdasda\n");
     ConvBuffer1x1 conv;
     RETURN_IF_ERROR(CreateConvBuffer1x1Wino4x4To6x6(creation_context, op_def,
                                                     attr, &conv, &dst_shape));
     *ptr = absl::make_unique<ConvBuffer1x1>(std::move(conv));
   } else {
+    // printf("ASADSDSADSAD\n");
     ConvPowerVR conv;
     RETURN_IF_ERROR(CreateConvPowerVRWino4x4To6x6(creation_context, op_def,
                                                   attr, &conv, &dst_shape));
@@ -203,6 +205,7 @@ absl::Status SelectConvolutionForWinograd(
       return absl::OkStatus();
     }
     case Vendor::MALI:
+      // printf(":::::::::::::::::::::::\n");
       return SelectConvolutionWinogradMali(attr, dst_shape, creation_context,
                                            op_def, ptr);
     default:

@@ -347,9 +347,11 @@ cl_mem CreateImage2DLegacy(cl_context context, cl_mem_flags flags,
                            const cl_image_desc* image_desc, void* host_ptr,
                            cl_int* errcode_ret) {
   if (clCreateImage) {  // clCreateImage available since OpenCL 1.2
+  // printf("DSDSDSADSDASDASDASDASDSA\n");
     return clCreateImage(context, flags, image_format, image_desc, host_ptr,
                          errcode_ret);
   } else {
+  // printf("fggggggggggggggggggggggggg\n");
     return clCreateImage2D(context, flags, image_format,
                            image_desc->image_width, image_desc->image_height,
                            image_desc->image_row_pitch, host_ptr, errcode_ret);

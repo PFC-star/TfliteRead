@@ -93,11 +93,10 @@ Interpreter::Interpreter(ErrorReporter* error_reporter)
   // Prod logging is useful for mobile platforms where scraping console logs is
   // critical for debugging.
 #if defined(TFLITE_IS_MOBILE_PLATFORM)
-  TFLITE_LOG_PROD_ONCE(TFLITE_LOG_INFO, "Initialized TensorFlow Lite runtime.");
+  TFLITE_LOG_PROD_ONCE(TFLITE_LOG_INFO, "Initialized TensorFlow Lite runtime");
 #else
-  TFLITE_LOG_ONCE(TFLITE_LOG_INFO, "Initialized TensorFlow Lite runtime.");
+  TFLITE_LOG_ONCE(TFLITE_LOG_INFO, "Initialized TensorFlow Lite runtime");
 #endif
-
   // There's always at least 1 subgraph which is the primary subgraph.
   AddSubgraphs(1);
   context_ = primary_subgraph().context();
@@ -302,12 +301,12 @@ TfLiteStatus Interpreter::SetExecutionPlan(const std::vector<int>& new_plan) {
 
 void Interpreter::UseNNAPI(bool enable) { primary_subgraph().UseNNAPI(enable); }
 
-void Interpreter::SetNumThreads(int num_threads) {
+TfLiteStatus Interpreter::SetNumThreads(int num_threads) {
   if (num_threads < -1) {
     context_->ReportError(context_,
                           "num_threads should be >=0 or just -1 to let TFLite "
                           "runtime set the value.");
-    return;
+    return kTfLiteError;
   }
 
   for (auto& subgraph : subgraphs_) {
@@ -320,6 +319,7 @@ void Interpreter::SetNumThreads(int num_threads) {
       c->Refresh(context_);
     }
   }
+  return kTfLiteOk;
 }
 
 void Interpreter::SetAllowFp16PrecisionForFp32(bool allow) {
@@ -341,7 +341,7 @@ bool Interpreter::IsCancelled() { return primary_subgraph().IsCancelled(); }
 
 TfLiteStatus Interpreter::ModifyGraphWithDelegate(TfLiteDelegate* delegate) {
   TfLiteStatus status = kTfLiteOk;
-  for (auto& subgraph : subgraphs_) {
+  for (auto& subgraph : subgraphs_) {   // 1个subgraph
     status = subgraph->ModifyGraphWithDelegate(delegate);
     if (status != kTfLiteOk) {
       break;

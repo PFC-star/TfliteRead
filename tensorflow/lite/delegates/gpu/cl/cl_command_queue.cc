@@ -66,6 +66,7 @@ absl::Status CLCommandQueue::DispatchImplicit(const CLKernel& kernel, int3 grid,
     global[i] = AlignByN(grid[i], work_group_size[i]);
   }
   cl_event resulting_event;
+  // printf("%d, %d, %d;\t %d, %d, %d\n", global[0], global[1], global[2], local[0], local[1], local[2]);
   const int error_code = clEnqueueNDRangeKernel(
       queue_, kernel.kernel(), 3, nullptr, global.data(), local.data(), 0,
       nullptr, event ? &resulting_event : nullptr);

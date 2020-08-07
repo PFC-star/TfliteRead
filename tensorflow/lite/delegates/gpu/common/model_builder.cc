@@ -525,8 +525,7 @@ class Conv2DOperationParser : public TFLiteOperationParser {
           absl::StrCat("Expected 1 or 2 input tensor(s), but node has ",
                        runtime_inputs, " runtime inputs."));
     }
-    const int runtime_outputs =
-        GetNumberOfRuntimeOutputsForNode(context, tflite_node);
+    const int runtime_outputs = NumOutputs(tflite_node);
     if (runtime_outputs != 1) {
       return absl::InternalError(
           absl::StrCat("Expected 1 output tensor(s), but node has ",
@@ -2789,7 +2788,7 @@ bool IsAllAllowedTensors(TfLiteContext* context,
 // TODO(impjdi): Check ops' parameters.
 TfLiteIntArray* GetOpsToReplace(TfLiteContext* context, bool allow_quant_ops,
                                 int max_delegated_partitions) {
-  delegates::IsNodeSupportedFn node_supported_fn =
+  delegates::IsNodeSupportedFn node_supported_fn =      // Lambda, 应该是用于判断一个算子是否是supported_fn, 然后GraphPartitionHelper会基于此对图进行划分
       [=](TfLiteContext* context, TfLiteNode* node,
           TfLiteRegistration* registration,
           std::string* unsupported_details) -> bool {
@@ -2822,9 +2821,12 @@ TfLiteIntArray* GetOpsToReplace(TfLiteContext* context, bool allow_quant_ops,
 
   // By default, we simply get 1st largest partition as 'max_delegate_partions'
   // is set to 1 by default.
-  std::vector<int> ops_to_replace =
+  std::vector<int> ops_to_replace =           
       partition_helper.GetNodesOfFirstNLargestPartitions(
           max_delegated_partitions);
+  // for (auto otr: ops_to_replace) {
+  //   printf("%d\n", otr);
+  // }
 
   if (!unsupported_nodes_info.empty()) {
     std::string unsupported = absl::StrJoin(unsupported_nodes_info, "\n");
@@ -2896,13 +2898,16 @@ absl::Status BuildModel(TfLiteContext* context,
     tflite_nodes.push_back(i);
   }
   std::unordered_map<int, Value*> tensor_to_value;
+  // printf("%d %d\n", delegate_params->input_tensors->size, delegate_params->output_tensors->size);
   RETURN_IF_ERROR(PrecreateIOTensors(context, graph,
                                      delegate_params->input_tensors,
                                      quant_conversion_map, &tensor_to_value));
   RETURN_IF_ERROR(PrecreateIOTensors(context, graph,
                                      delegate_params->output_tensors,
                                      quant_conversion_map, &tensor_to_value));
+  // printf("%d, %d, %d, %d\n", graph->nodes().size(), graph->values().size(), graph->inputs().size(), graph->outputs().size());
   for (int i = 0; i < operations.size(); ++i) {
+    // printf("%d, %d, %d, %d\n", graph->nodes().size(), graph->values().size(), graph->inputs().size(), graph->outputs().size());
     TfLiteNode* tflite_node;
     TfLiteRegistration* registration;
     RETURN_IF_ERROR(GetNodeAndRegistration(
@@ -2923,15 +2928,24 @@ absl::Status BuildModel(TfLiteContext* context,
 absl::Status BuildFinalModel(
     TfLiteContext* context, const TfLiteDelegateParams* delegate_params,
     GraphFloat32* graph, std::unordered_map<int, int>* quant_conversion_map) {
+      
+      // printf("%d, %d, %d\n", delegate_params->nodes_to_replace->size, delegate_params->input_tensors->size, delegate_params->output_tensors->size);
   RETURN_IF_ERROR(
       BuildModel(context, delegate_params, graph, quant_conversion_map));
-
+      // printf("%d, %d, %d, %d\n", graph->nodes().size(), graph->values().size(), graph->inputs().size(), graph->outputs().size());
+  // for (int i=0; i<graph->nodes().size(); i++) {
+  //   printf("%s\n", ((graph->nodes())[i])->operation.type.c_str());
+  // }
   // Apply general transformations on the graph.
   NullTransformationReporter reporter;
   ModelTransformer transformer(graph, &reporter);
   if (!ApplyGeneralTransformations(&transformer)) {
     return absl::InternalError("Graph general transformations failed");
   }
+  // printf("%d, %d, %d, %d\n", graph->nodes().size(), graph->values().size(), graph->inputs().size(), graph->outputs().size());
+  // for (int i=0; i<graph->nodes().size(); i++) {
+  //   printf("%s\n", ((graph->nodes())[i])->operation.type.c_str());
+  // }
   return absl::OkStatus();
 }
 

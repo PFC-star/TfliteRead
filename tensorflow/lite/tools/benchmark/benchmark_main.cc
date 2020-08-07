@@ -23,7 +23,7 @@ namespace benchmark {
 
 int Main(int argc, char** argv) {
   TFLITE_LOG(INFO) << "STARTING!";
-  BenchmarkTfLiteModel benchmark;
+  BenchmarkTfLiteModel benchmark; // 采用默认参数初始化, 然后启动一个Listener(本质就是一个log)
   if (benchmark.Run(argc, argv) != kTfLiteOk) {
     TFLITE_LOG(ERROR) << "Benchmarking failed.";
     return EXIT_FAILURE;

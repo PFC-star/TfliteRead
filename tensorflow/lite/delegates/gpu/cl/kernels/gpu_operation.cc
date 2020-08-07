@@ -138,7 +138,6 @@ GPUOperation& GPUOperation::operator=(GPUOperation&& operation) {
 
 void GPUOperation::AddOperation(ElementwiseOperation* operation) {
   linked_operations_.push_back(operation);
-  operation->SetLinkIndex(linked_operations_.size());
 }
 
 ElementwiseOperation::ElementwiseOperation(ElementwiseOperation&& operation)
@@ -203,37 +202,10 @@ absl::Status ElementwiseOperation::Tune(const TuningParameters& params) {
   return GetBestWorkGroup(params, kernel_, GetGridSize(), &work_group_size_);
 }
 
-std::string GetArgsDeclaration(
-    const std::vector<ElementwiseOperation*>& linked_ops) {
-  std::string code;
-  for (auto linked_op : linked_ops) {
-    code += linked_op->GetArgsDeclaration();
-  }
-  code += ",\n";
-
-  return code;
-}
-
-std::string PostProcess(const std::vector<ElementwiseOperation*>& linked_ops,
-                        const LinkingContext& context) {
-  std::string code;
-  for (auto linked_op : linked_ops) {
-    code += "{" + linked_op->GetCoreCode(context) + "}";
-  }
-  return code;
-}
-
-absl::Status BindArgs(CLKernel* kernel,
-                      const std::vector<ElementwiseOperation*>& linked_ops) {
-  for (auto linked_op : linked_ops) {
-    RETURN_IF_ERROR(linked_op->BindArguments(kernel));
-  }
-  return absl::OkStatus();
-}
-
 absl::Status MergeOperations(
     const std::vector<ElementwiseOperation*>& linked_ops,
     Arguments* merged_args, std::string* merged_code) {
+  // printf("linked_ops.size(): %d\n", linked_ops.size());
   for (int i = 0; i < linked_ops.size(); ++i) {
     std::string code = linked_ops[i]->GetCode();
     std::string unique_postfix = absl::StrCat("_link", i + 1);

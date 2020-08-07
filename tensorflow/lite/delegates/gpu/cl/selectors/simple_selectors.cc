@@ -181,10 +181,10 @@ absl::Status SelectWinograd4x4To36(const CreationContext& creation_context,
                                    const Padding2D& padding,
                                    const OperationDef& op_def,
                                    std::unique_ptr<GPUOperation>* ptr) {
-  Winograd4x4To36 operation;
+  Winograd4x4To36 operation;                                // 创建了一个Winograd4x4To36的operation
   RETURN_IF_ERROR(
-      CreateWinograd4x4To36(creation_context, op_def, padding, &operation));
-  *ptr = absl::make_unique<Winograd4x4To36>(std::move(operation));
+      CreateWinograd4x4To36(creation_context, op_def, padding, &operation));  // 用传进来的信息来设置这个operation
+  *ptr = absl::make_unique<Winograd4x4To36>(std::move(operation));            // 将设置好的operation返回回去
   return absl::OkStatus();
 }
 

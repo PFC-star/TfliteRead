@@ -38,11 +38,14 @@ std::string GetWinograd4x4To36Code(
     Arguments* args) {
   std::string c = GetCommonDefines(op_def.precision);
 
+  // std::cout << c << std::endl;
+
   const auto src_tensor_type = op_def.src_tensors[0].storage_type;
   const bool is_image_buffer =
       src_tensor_type == TensorStorageType::IMAGE_BUFFER;
   const bool is_buffer = src_tensor_type == TensorStorageType::BUFFER;
 
+  // 数据类型设置
   switch (op_def.precision) {
     case CalculationsPrecision::F32:
     case CalculationsPrecision::F32_F16:
@@ -57,6 +60,7 @@ std::string GetWinograd4x4To36Code(
                                   ? DataType::FLOAT16
                                   : DataType::FLOAT32;
 
+  // 生成写死一个bt mat，但创建的cl_mem的那个bt是6*8的
   auto bt_mat = BtMatrixForWinograd4x4To6x6();
   c += "constant ACCUM_FLT Bt[36] = {\n";
   for (int y = 0; y < 6; ++y) {
@@ -68,7 +72,8 @@ std::string GetWinograd4x4To36Code(
   }
   c += "};\n";
 
-  std::string cl_type = accum_type == DataType::FLOAT16 ? "half" : "float";
+  std::string cl_type = accum_type == DataType::FLOAT16 ? "half" : "float"; // half
+
   auto src_desc = absl::make_unique<TensorDescriptor>(op_def.src_tensors[0]);
   src_desc->SetStateVar("ACCUM_FLT", cl_type);
   args->AddObjectRef("src_tensor", AccessType::READ, std::move(src_desc));
@@ -79,6 +84,9 @@ std::string GetWinograd4x4To36Code(
   args->AddInt("padding_y");
   args->AddInt("tiles_total");
   args->AddInt("tiles_x");
+
+// 这个$0后续应该会替换
+  // printf("%d, %d\n", args.tiles_total, )
 
   c += "__kernel void main_function(\n";
   c += "$0) {\n";
@@ -102,6 +110,7 @@ std::string GetWinograd4x4To36Code(
   c += "  bt_ar[3] = t0.w;\n";
   c += "  bt_ar[4] = t1.x;\n";
   c += "  bt_ar[5] = t1.y;\n";
+  // std::cout << c << std::endl;
   auto read_src = [&](const std::string& src, const std::string& xs) {
     if (is_image_buffer) {
       c += "    ACCUM_FLT4 " + src +
@@ -350,14 +359,22 @@ absl::Status Winograd4x4To36::Compile(const CreationContext& creation_context) {
       creation_context.device->IsPowerVR()) {
     options.push_back(CompilerOptions::POWERVR_FP16);
   }
-  RETURN_IF_ERROR(UploadBt(creation_context.context));
+  RETURN_IF_ERROR(UploadBt(creation_context.context));  // 在这里又创建了一个Bt矩阵，但感觉并没什么用，偷偷试了下注释掉也没影响
   std::string code = GetWinograd4x4To36Code(definition_, &args_);
+  std::string code_bak = code;
   std::string element_wise_code;
   RETURN_IF_ERROR(
       MergeOperations(linked_operations_, &args_, &element_wise_code));
+  // printf("\n%s\n", element_wise_code.c_str()); // No element_wise ops and no element_wise_code
   RETURN_IF_ERROR(args_.TransformToCLCode(creation_context.device->GetInfo(),
                                           {{"dst_tensor", element_wise_code}},
                                           &code));
+  // if (code != code_bak) printf("%d %d############################\n", code.size(), code_bak.size());
+
+  // printf("############################ Winograd4x4To36 Code Start ############################\n");
+  // std::cout << code << std::endl;
+  // printf("############################# Winograd4x4To36 Code End #############################\n");
+    // std::cout << "################################################\n" << code << "\n#############################################" << std::endl;
   RETURN_IF_ERROR(creation_context.cache->GetOrCreateCLKernel(
       code, "main_function", options, *creation_context.context,
       *creation_context.device, &kernel_));
@@ -366,15 +383,24 @@ absl::Status Winograd4x4To36::Compile(const CreationContext& creation_context) {
 }
 
 absl::Status Winograd4x4To36::UploadBt(CLContext* context) {
-  tflite::gpu::Tensor<Linear, DataType::FLOAT32> bt_aligned;
-  bt_aligned.shape = Linear(6 * 8);
+  tflite::gpu::Tensor<Linear, DataType::FLOAT32> bt_aligned;  // 创建了一个新的Tensor
+  bt_aligned.shape = Linear(6 * 8);                 
   bt_aligned.data.resize(6 * 8);
-  auto bt_mat = BtMatrixForWinograd4x4To6x6();
+  auto bt_mat = BtMatrixForWinograd4x4To6x6();                // 获取了这样一个Matrix
+  
+  // for (int y = 0; y < 6; ++y) {
+  //   for (int x = 0; x < 6; ++x) {
+  //     printf("%f\t", bt_mat[y * 6 + x]);         // 更新这个Tensor
+  //   }
+  //   printf("\n");
+  // }
+  // printf("##################################\n");
+
   for (int y = 0; y < 6; ++y) {
     for (int x = 0; x < 6; ++x) {
-      bt_aligned.data[y * 8 + x] = bt_mat[y * 6 + x];
+      bt_aligned.data[y * 8 + x] = bt_mat[y * 6 + x];         // 更新这个Tensor
     }
-    bt_aligned.data[y * 8 + 6] = 0.0f;
+    bt_aligned.data[y * 8 + 6] = 0.0f;                        // 在6*6的右边再补两列0
     bt_aligned.data[y * 8 + 7] = 0.0f;
   }
 
@@ -382,11 +408,18 @@ absl::Status Winograd4x4To36::UploadBt(CLContext* context) {
   desc.storage_type = LinearStorageType::TEXTURE_2D;
   desc.element_type = definition_.GetDataType();
 
+  // printf("%d\n", desc.element_type);
+
+  // printf("KKKKKKKKKKKKKKKKKKKKKK\n");
+
   LinearStorage lt;
+  // printf("###################### BT #####################\n");
   RETURN_IF_ERROR(CreateLinearStorage(desc, bt_aligned, context, &lt));
+  // printf("###################### BT End #####################\n");
   args_.AddObject("bt", AccessType::READ,
                   absl::make_unique<LinearStorage>(std::move(lt)),
                   absl::make_unique<TensorLinearDescriptor>(desc));
+
   return absl::OkStatus();
 }
 
@@ -403,6 +436,7 @@ absl::Status Winograd4x4To36::BindArguments() {
   const int tiles_y = DivideRoundUp(
       src_[0]->Height() + padding_.prepended.h + padding_.appended.h - 2, 4);
   const int tiles_total = tiles_x * tiles_y;
+  // printf("%d, %d, %d, %d\n", -padding_.prepended.w, -padding_.prepended.h, tiles_total, tiles_x);
   RETURN_IF_ERROR(args_.SetObjectRef("src_tensor", src_[0]));
   RETURN_IF_ERROR(args_.SetObjectRef("dst_tensor", dst_[0]));
   RETURN_IF_ERROR(args_.SetInt("padding_x", -padding_.prepended.w));
@@ -434,15 +468,27 @@ absl::Status Winograd4x4To36::Tune(const TuningParameters& params) {
 }
 
 absl::Status Winograd4x4To36::AddToQueue(CLCommandQueue* queue) {
+  // printf("Winograd4x4To36 Run\n");
   RETURN_IF_ERROR(BindArguments());
-  return queue->DispatchImplicit(kernel_, GetGridSize(), work_group_size_);
+  auto status = queue->DispatchImplicit(kernel_, GetGridSize(), work_group_size_);
+
+  // cl_mem mysrc = src_[0]->GetMemoryPtr();
+  // cl_mem mydst = dst_[0]->GetMemoryPtr();
+  // clFinish(queue->queue());
+  // int inputSize = 1*36*14400*128;
+  // std::vector<float> output(inputSize, 0);
+  // clEnqueueReadBuffer(queue->queue(), mydst, CL_TRUE, 0, sizeof(float)*inputSize, output.data(), 0, NULL, NULL);
+  // for (int i=0; i<36; i++)
+  //   std::cout << output[i] << "\t";
+  // std::cout << std::endl;
+  return status;
 }
 
 absl::Status CreateWinograd4x4To36(const CreationContext& creation_context,
                                    const OperationDef& definition,
                                    const Padding2D& padding,
                                    Winograd4x4To36* result) {
-  *result = Winograd4x4To36(definition, padding);
+  *result = Winograd4x4To36(definition, padding);  // 用传入进来的参数创建了一个新的Winograd4x4To36的节点
   return result->UploadBt(creation_context.context);
 }
 
@@ -468,11 +514,16 @@ absl::Status Winograd36To4x4::Compile(const CreationContext& creation_context) {
   }
   std::string code = GetWinograd36To4x4Code(definition_, &args_);
   std::string element_wise_code;
+  // printf("%d\n", linked_operations_.size());
   RETURN_IF_ERROR(
       MergeOperations(linked_operations_, &args_, &element_wise_code));
   RETURN_IF_ERROR(args_.TransformToCLCode(creation_context.device->GetInfo(),
                                           {{"dst_tensor", element_wise_code}},
                                           &code));
+  // printf("############################ Winograd36To4x4 Code Start ############################\n");
+  // std::cout << code << std::endl;
+  // printf("############################# Winograd36To4x4 Code End #############################\n");
+  // std::cout << __func__ << std::endl;
   RETURN_IF_ERROR(creation_context.cache->GetOrCreateCLKernel(
       code, "main_function", options, *creation_context.context,
       *creation_context.device, &kernel_));
@@ -492,6 +543,13 @@ absl::Status Winograd36To4x4::UploadAt(CLContext* context) {
     at_aligned.data[y * 8 + 6] = 0.0f;
     at_aligned.data[y * 8 + 7] = 0.0f;
   }
+
+  // for (int y=0; y<4; y++) {
+  //   for (int x=0; x<8; x++) {
+  //     printf("%f\t", at_aligned.data[y*8+x]);
+  //   }
+  //   printf("\n");
+  // }
 
   TensorLinearDescriptor desc;
   desc.storage_type = LinearStorageType::TEXTURE_2D;
@@ -543,8 +601,11 @@ absl::Status Winograd36To4x4::Tune(const TuningParameters& params) {
 }
 
 absl::Status Winograd36To4x4::AddToQueue(CLCommandQueue* queue) {
+  // printf("Winograd36To4x4Start\n");
   RETURN_IF_ERROR(BindArguments());
-  return queue->DispatchImplicit(kernel_, GetGridSize(), work_group_size_);
+  auto ret = queue->DispatchImplicit(kernel_, GetGridSize(), work_group_size_);
+  // printf("Winograd36To4x4End\n");
+  return ret;
 }
 
 absl::Status CreateWinograd36To4x4(
@@ -557,7 +618,7 @@ absl::Status CreateWinograd36To4x4(
   desc.element_type = definition.GetDataType();
   LinearStorage lt;
   RETURN_IF_ERROR(
-      CreateLinearStorage(desc, biases, creation_context.context, &lt));
+      CreateLinearStorage(desc, biases, creation_context.context, &lt));   // 为bias创建texture2d的cl_mem
   result->args_.AddObject("biases", AccessType::READ,
                           absl::make_unique<LinearStorage>(std::move(lt)),
                           absl::make_unique<TensorLinearDescriptor>(desc));

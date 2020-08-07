@@ -60,6 +60,10 @@ struct CLNode {
 
 class InferenceContext {
  public:
+  void GetNodes(std::vector<CLNode>* tmp) {
+    tmp = &nodes_;
+  }
+
   struct CreateInferenceInfo {
     CalculationsPrecision precision;
     TensorStorageType storage_type;
@@ -164,9 +168,9 @@ class InferenceContext {
   };
   TensorReserver tensor_reserver_;
 
-  std::vector<Buffer> shared_buffers_;
+  std::vector<Buffer> shared_buffers_;  // 为tensor申请了哪些cl mem
   std::vector<Tensor>
-      shared_buffer_tensors_;  // use references to memory from shared_buffers_
+      shared_buffer_tensors_;  // 由于不同tensor间会复用cl mem，此处记录各个tensor对应自己的cl_mem,use references to memory from shared_buffers_
   std::map<ValueId, int> graph_ids_to_shared_buffer_tensors_;
 
   std::map<ValueId, Tensor> strong_shape_tensors_;

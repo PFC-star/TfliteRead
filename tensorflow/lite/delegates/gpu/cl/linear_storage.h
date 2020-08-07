@@ -40,13 +40,14 @@ enum class LinearStorageType { BUFFER, TEXTURE_2D };
 struct TensorLinearDescriptor : public GPUObjectDescriptor {
   LinearStorageType storage_type;
   DataType element_type;  // FLOAT32 or FLOAT16
+  MemoryType memory_type = MemoryType::GLOBAL;  // applicable for BUFFER
 
   absl::Status PerformSelector(const std::string& selector,
                                const std::vector<std::string>& args,
                                const std::vector<std::string>& template_args,
                                std::string* result) const override;
 
-  GPUResources GetGPUResources(AccessType access_type) const override;
+  GPUResources GetGPUResources() const override;
   absl::Status PerformReadSelector(const std::vector<std::string>& args,
                                    std::string* result) const;
 };
@@ -78,7 +79,8 @@ class LinearStorage : public GPUObject {
   std::string ReadLinearFLT4(const std::string& z_coord) const;
   std::string GetDeclaration() const;
 
-  GPUResourcesWithValue GetGPUResources(AccessType access_type) const override;
+  absl::Status GetGPUResources(const GPUObjectDescriptor* obj_ptr,
+                               GPUResourcesWithValue* resources) const override;
 
  private:
   friend absl::Status CreateTextureLinearStorage(int size, DataType data_type,
@@ -145,13 +147,19 @@ absl::Status CreateLinearStorage(const TensorLinearDescriptor& descriptor,
                                              : tensor.shape.v;
   const int depth = DivideRoundUp(size, 4);
   if (creation_info.data_type == DataType::FLOAT32) {
+    // printf("%d\n", depth);
     std::vector<float4> gpu_data(depth);
+    // printf("%d\n", depth);
     CopyLinearFLT4(tensor, absl::MakeSpan(gpu_data));
+    for (int i=0; i<gpu_data.size(); i++) {
+      // printf("%d: %f, %f, %f, %f\n", i, gpu_data[i].x, gpu_data[i].y, gpu_data[i].z, gpu_data[i].w);
+    }
     RETURN_IF_ERROR(CreateLinearStorage(creation_info, depth, gpu_data.data(),
                                         context, result));
   } else {
     std::vector<half4> gpu_data(depth);
-    CopyLinearFLT4(tensor, absl::MakeSpan(gpu_data));
+    CopyLinearFLT4(tensor, absl::MakeSpan(gpu_data)); // 将tensor复制到一个gpu data中
+    
     RETURN_IF_ERROR(CreateLinearStorage(creation_info, depth, gpu_data.data(),
                                         context, result));
   }

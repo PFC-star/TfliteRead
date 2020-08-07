@@ -29,8 +29,8 @@ TfLiteStatus CreateNewTensorWithDifferentType(TfLiteContext* context,
                                               TfLiteType new_type,
                                               TfLiteTensor** new_tensor,
                                               int* new_tensor_index) {
-  const TfLiteTensor& original_tensor = context->tensors[original_tensor_index];
   TF_LITE_ENSURE_STATUS(context->AddTensors(context, 1, new_tensor_index));
+  const TfLiteTensor& original_tensor = context->tensors[original_tensor_index];
   *new_tensor = &context->tensors[*new_tensor_index];
   (*new_tensor)->type = new_type;
   (*new_tensor)->allocation_type = kTfLiteArenaRw;
@@ -49,16 +49,22 @@ TfLiteStatus CreateNewTensorWithDifferentType(TfLiteContext* context,
 TfLiteStatus GraphPartitionHelper::Partition(
     std::set<std::string>* unsupported_nodes_info) {
   const auto prepare_status = PrepareSupportedNodes(unsupported_nodes_info);
+  // for (auto node_info: *unsupported_nodes_info){
+  //   printf("#$#$#$#$# %s\n", node_info.c_str());
+  // }
+  
   if (prepare_status != kTfLiteOk) return prepare_status;
 
   TfLiteDelegateParams* partition_params_array_ = nullptr;
   int num_partitions_ = 0;
-  if (context_->PreviewDelegatePartitioning(context_, supported_nodes_,
+  // printf("%d\n", supported_nodes_->size);
+  if (context_->PreviewDelegatePartitioning(context_, supported_nodes_,   // 一共有64个 Node
                                             &partition_params_array_,
                                             &num_partitions_) != kTfLiteOk) {
     TF_LITE_KERNEL_LOG(context_, "Unable to preview delegate partition.\n");
     return kTfLiteError;
   }
+  // printf("###%d \n", num_partitions_);
 
   for (int i = 0; i < num_partitions_; ++i) {
     partitions_.push_back(partition_params_array_ + i);

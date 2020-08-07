@@ -420,6 +420,10 @@ TfLiteStatus DelegatePrepare(TfLiteContext* context, TfLiteDelegate* delegate) {
   TfLiteIntArray* ops_to_replace =
       GetOpsToReplace(context, gpu_delegate->IsQuantOpsAllowed(),
                       gpu_delegate->MaxDelegatedPartitions());
+  
+  // for (int i=0; i<ops_to_replace->size; i++) {
+  //   printf("%d %d\n", i, ops_to_replace->data[i]);
+  // }
   const auto status = context->ReplaceNodeSubsetsWithDelegateKernels(
       context, kRegistration, ops_to_replace, delegate);
   TFLITE_LOG_PROD(TFLITE_LOG_INFO, "Created %d GPU delegate kernels.",

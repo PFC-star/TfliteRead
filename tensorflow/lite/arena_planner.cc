@@ -81,12 +81,13 @@ TfLiteStatus ArenaPlanner::PlanAllocations() {
   // Maybe other verb instead of 'Assigned'
   alloc_node_.assign(graph_info_->num_tensors(), kNodeNotAssigned);
   dealloc_node_.assign(graph_info_->num_tensors(), kNodeNotAssigned);
+  // printf("%d, %d\n", alloc_node_.size(), dealloc_node_.size());
 
   // Keeps track of references to each tensor.
-  std::vector<int> refcounts(graph_info_->num_tensors(), 0);
+  std::vector<int> refcounts(graph_info_->num_tensors(), 0); // 记录每个Tensor被用了几次
 
   auto allocate = [this](int node, int tensor) -> TfLiteStatus {
-    if (alloc_node_[tensor] != kNodeNotAssigned) {
+    if (alloc_node_[tensor] != kNodeNotAssigned) {  // 已经alloc了
       // Tensor has already been allocated.
       return kTfLiteOk;
     }
@@ -96,7 +97,7 @@ TfLiteStatus ArenaPlanner::PlanAllocations() {
   };
 
   auto deallocate = [this](int node, int tensor) -> TfLiteStatus {
-    if (alloc_node_[tensor] == kNodeNotAssigned) {
+    if (alloc_node_[tensor] == kNodeNotAssigned) {  // 这个tensor并没有alloc
       // We don't need to deallocate the tensor, that is never allocated.
       // This happened with the constant tensors.
       return kTfLiteOk;
@@ -121,6 +122,7 @@ TfLiteStatus ArenaPlanner::PlanAllocations() {
 
   // Queue all graph inputs for allocation. If preserve_inputs_ is true, make
   // sure they never be overwritten.
+  // 在保留输入的情况下上来就为输入分配
   for (int tensor_index : graph_info_->inputs()) {
     if (tensor_index != kTfLiteOptionalTensor) {
       if (preserve_inputs_) {
@@ -129,6 +131,9 @@ TfLiteStatus ArenaPlanner::PlanAllocations() {
       TF_LITE_ENSURE_STATUS(allocate(0, tensor_index));
     }
   }
+  // printf("######################\n");
+  // for (int i=0; i<alloc_node_.size(); i++)
+  //   printf("%d, ", alloc_node_[i]);
 
   // Queue all graph variable tensors for allocation.
   for (int tensor_index : graph_info_->variables()) {
@@ -151,6 +156,7 @@ TfLiteStatus ArenaPlanner::PlanAllocations() {
     }
   }
 
+  // 为输入分配内存
   // Queue all graph inputs for allocation.
   for (int tensor_index : graph_info_->inputs()) {
     if (tensor_index != kTfLiteOptionalTensor) {
@@ -170,7 +176,7 @@ TfLiteStatus ArenaPlanner::PlanAllocations() {
 
     // Then update the ref-counts of the node's inputs, and if necessary queue
     // them for deallocation.
-    if (!preserve_intermediates_) {
+    if (!preserve_intermediates_) { // 不保存中间值的话
       TfLiteIntArray* node_inputs = node.inputs;
       for (int j = 0; j < node_inputs->size; ++j) {
         int tensor_index = node_inputs->data[j];
@@ -183,7 +189,13 @@ TfLiteStatus ArenaPlanner::PlanAllocations() {
       }
     }
   }
-
+  // printf("######################\n");
+  // for (int i=0; i<alloc_node_.size(); i++)
+  //   printf("%d, ", alloc_node_[i]);
+  // printf("\n######################\n");
+  // for (int i=0; i<dealloc_node_.size(); i++)
+  //   printf("%d, ", dealloc_node_[i]);
+  //   printf("\n######################\n");
   // Note that graph outputs will never be scheduled for deallocation. We
   // could do that here for completeness, but it won't have any effect.
   return kTfLiteOk;

@@ -14,9 +14,6 @@ limitations under the License.
 ==============================================================================*/
 #include "tensorflow/lite/interpreter_builder.h"
 
-#if !defined(__ANDROID__) && !defined(__APPLE__) && !defined(_WIN32)
-#include <dlfcn.h>
-#endif
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -31,6 +28,7 @@ limitations under the License.
 #include "tensorflow/lite/core/api/flatbuffer_conversions.h"
 #include "tensorflow/lite/kernels/internal/compatibility.h"
 #include "tensorflow/lite/schema/schema_generated.h"
+#include "tensorflow/lite/shared_library.h"
 #include "tensorflow/lite/tflite_with_xnnpack_optional.h"
 #include "tensorflow/lite/util.h"
 #include "tensorflow/lite/version.h"
@@ -117,15 +115,22 @@ const char* kEmptyTensorName = "";
 // For flex delegate, see also the strong override in
 // lite/delegates/flex/delegate.cc.
 TFLITE_ATTRIBUTE_WEAK Interpreter::TfLiteDelegatePtr AcquireFlexDelegate() {
-#if !defined(__ANDROID__) && !defined(__APPLE__) && !defined(_WIN32)
+#if !defined(__ANDROID__)
   // If _pywrap_tensorflow_internal.so is available, use
   // TF_AcquireFlexDelegate() to initialize flex delegate.
+  const char* filename_pywrap_tensorflow_internal =
+#if defined(_WIN32)
+      "_pywrap_tensorflow_internal.pyd";
+#else
+      "_pywrap_tensorflow_internal.so";
+#endif
   void* lib_tf_internal =
-      dlopen("_pywrap_tensorflow_internal.so", RTLD_NOW | RTLD_LOCAL);
+      SharedLibrary::LoadLibrary(filename_pywrap_tensorflow_internal);
   if (lib_tf_internal) {
     auto TF_AcquireFlexDelegate =
         reinterpret_cast<Interpreter::TfLiteDelegatePtr (*)()>(
-            dlsym(lib_tf_internal, "TF_AcquireFlexDelegate"));
+            SharedLibrary::GetLibrarySymbol(lib_tf_internal,
+                                            "TF_AcquireFlexDelegate"));
     if (TF_AcquireFlexDelegate) {
       return TF_AcquireFlexDelegate();
     }
@@ -239,9 +244,9 @@ TfLiteStatus InterpreterBuilder::ParseNodes(
   TfLiteStatus status = kTfLiteOk;
 
   // Reduce the number of redundant allocations
-  subgraph->ReserveNodes(operators->size());
+  subgraph->ReserveNodes(operators->size()); // 开辟空间  
 
-  for (int i = 0; i < operators->size(); ++i) {
+  for (int i = 0; i < operators->size(); ++i) { // 遍历
     const auto* op = operators->Get(i);
     int index = op->opcode_index();
     if (index < 0 || index >= flatbuffer_op_index_to_registration_.size()) {
@@ -251,7 +256,7 @@ TfLiteStatus InterpreterBuilder::ParseNodes(
       continue;
     }
 
-    const TfLiteRegistration* registration =
+    const TfLiteRegistration* registration =  // 根据opcode, 找到对应的registration
         flatbuffer_op_index_to_registration_[index];
     if (registration == nullptr) {
       error_reporter_->Report("Skipping op for opcode_index %d\n", index);
@@ -259,7 +264,7 @@ TfLiteStatus InterpreterBuilder::ParseNodes(
       continue;
     }
 
-    BuiltinOperator op_type =
+    BuiltinOperator op_type =               // 获取那个opcode对应的算符类型
         static_cast<BuiltinOperator>(registration->builtin_code);
 
     if (op_type != BuiltinOperator_CUSTOM && op->custom_options()) {
@@ -268,7 +273,7 @@ TfLiteStatus InterpreterBuilder::ParseNodes(
           EnumNameBuiltinOperator(op_type));
     }
 
-    if (op_type == BuiltinOperator_CUSTOM) {
+    if (op_type == BuiltinOperator_CUSTOM) {  // 根据那个optype解析op, 然后调用AddNodeWithParameters
       if (op->custom_options()) {
         subgraph->AddNodeWithParameters(
             FlatBufferIntArrayToVector(op->inputs()),
@@ -448,12 +453,18 @@ TfLiteStatus InterpreterBuilder::ParseTensors(
   };
 
   num_fp32_tensors_ = 0;
-  for (int i = 0; i < tensors->size(); ++i) {
+  for (int i = 0; i < tensors->size(); ++i) { // 遍历所有的Tensor
     const auto* tensor = tensors->Get(i);
     std::vector<int> dims = FlatBufferIntArrayToVector(tensor->shape());
 
+    // printf("%s: ", get_name(tensor));
+    // int byte = 1;
+    // for (int j=0; j<dims.size(); j++)
+    //   byte *= dims[j];
+    // printf("%d\n", byte);
+
     TfLiteType type;
-    if (ConvertTensorType(tensor->type(), &type, error_reporter_) !=
+    if (ConvertTensorType(tensor->type(), &type, error_reporter_) !=      // 获取这些算子的dtype
         kTfLiteOk) {
       status = kTfLiteError;
       continue;
@@ -461,12 +472,12 @@ TfLiteStatus InterpreterBuilder::ParseTensors(
     if (type == kTfLiteFloat32) {
       ++num_fp32_tensors_;
     }
-    auto get_readonly_data = [&](const char** buffer_data,
+    auto get_readonly_data = [&](const char** buffer_data,  // 获取这个Tensor对应的buffer的数据及大小
                                  size_t* buffer_size) {
       // TODO(aselle): Check what happens if we have an unspecified size
       // constant.
       *buffer_data = nullptr;
-      if (tensor->buffer() == 0) return kTfLiteOk;
+      if (tensor->buffer() == 0) return kTfLiteOk;    // 这个buffer应该是某个tensor对应的数据buffer的编号
       if (tensor->buffer() >= buffers->size()) {
         error_reporter_->Report(
             "Tensor %d specifies out of range buffer %d (only %d buffers).\n",
@@ -488,9 +499,9 @@ TfLiteStatus InterpreterBuilder::ParseTensors(
     const char* buffer_ptr;
     TF_LITE_ENSURE_STATUS(get_readonly_data(&buffer_ptr, &buffer_size));
 
-    const auto* src_quantization = tensor->quantization();
+    const auto* src_quantization = tensor->quantization(); // 获取一些量化参数，如max, min, zero point, scale
     TfLiteQuantization quantization;
-    if (ParseQuantization(src_quantization, &quantization, dims) != kTfLiteOk) {
+    if (ParseQuantization(src_quantization, &quantization, dims) != kTfLiteOk) {  // 解析量化参数
       error_reporter_->Report("Tensor %d has invalid quantization parameters.",
                               i);
       status = kTfLiteError;
@@ -514,7 +525,7 @@ TfLiteStatus InterpreterBuilder::ParseTensors(
       }
 
       // TODO(b/144999664): Only constant sparse tensor is supported now.
-      const auto* src_sparsity = tensor->sparsity();
+      const auto* src_sparsity = tensor->sparsity();            // 稀疏性的支持
       TfLiteSparsity* sparsity = nullptr;
       if (ParseSparsity(src_sparsity, &sparsity) != kTfLiteOk) {
         error_reporter_->Report("Tensor %d has invalid sparsity parameters.",
@@ -577,7 +588,7 @@ TfLiteStatus InterpreterBuilder::operator()(
 
   // Safe exit by deleting partially created interpreter, to reduce verbosity
   // on error conditions. Use by return cleanup_on_error();
-  auto cleanup_and_error = [&interpreter]() {
+  auto cleanup_and_error = [&interpreter]() {   // lambda
     interpreter->reset();
     return kTfLiteError;
   };
@@ -613,6 +624,7 @@ TfLiteStatus InterpreterBuilder::operator()(
     return cleanup_and_error();
   }
 
+  // 根据输入的参数设置这个interpreter
   interpreter->reset(new Interpreter(error_reporter_));
   (*interpreter)->SetNumThreads(num_threads);
   if (subgraphs->size() > 1) {
@@ -630,15 +642,18 @@ TfLiteStatus InterpreterBuilder::operator()(
         (*interpreter)->subgraph(subgraph_index);
     auto operators = subgraph->operators();
     auto tensors = subgraph->tensors();
+    // printf("%d, %d\n", operators->size(), tensors->size()); // model_中的subgraph有65个op, 173个tensors
     if (!operators || !tensors || !buffers) {
       error_reporter_->Report(
           "Did not get operators, tensors, or buffers in subgraph %d.\n",
           subgraph_index);
       return cleanup_and_error();
     }
+
     if (modified_subgraph->AddTensors(tensors->size()) != kTfLiteOk) {
       return cleanup_and_error();
     }
+    // printf("Over\n");
     // Set num threads
     // Parse inputs/outputs
     modified_subgraph->SetInputs(
