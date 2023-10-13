@@ -144,7 +144,8 @@ typedef struct TfLiteNode {
   void* user_data;                  // 指向一个OpData的结构体，其是op的init()函数的返回值
                                     // 不同的算子维护的信息不同
   void* builtin_data;               //
-  struct TfLiteDelegate* delegate;  // Node对应的delegate
+   //add
+  struct TfLiteDelegate* delegate;  // Node对应的delegate ,这个地方或许可以修改Node到delegate的映射关系
 } TfLiteNode;
 
 /*******************************************************/
@@ -161,14 +162,29 @@ class Subgraph {
  private:
   std::vector<TfLiteTensor> tensors_; // subgraph中所有的Tensor构成的vector
   TfLiteContext context_ = {};        // subgraph维护的那个context
-    
-  // subgraph中Node到具体op的映射
+    //add
+  // subgraph中Node到具体op的映射  Node是图节点，op是算子，一个图节点有多个算子可以实现
   std::vector<std::pair<TfLiteNode, TfLiteRegistration>> nodes_and_registration_;
   
   std::vector<int> inputs_;	    // input tensor在tensors_的下标
   std::vector<int> outputs_;    // output index在tensors_的下标
   std::vector<int> variables_;  // 是variable的tensor在tensors_的下标
-  // pipeline执行算子时下一个要prepare node的下标
+  //add
+  // pipeline执行算子时下一个要prepare node的下标 ,这里有流水线呀，这个流水线是干嘛用的？
+//Pipeline 执行：Pipeline 的执行是一种并行化的方式，用于高效地执行执行计划中的节点。典型的 Pipeline 包括以下几个阶段：
+
+//a. 准备（Prepare）：在准备阶段，输入数据被准备，节点的输入张量被设置，以及一些前期工作被完成。这一阶段通常包括了数据准备、模型准备和参数设置。
+
+//b. 执行（Invoke）：在执行阶段，节点的实际计算被执行。每个节点的计算通常是在并行的硬件或内核上执行的。这是模型的主要计算阶段。
+
+//c. 分配内存（Plan Allocation）：在内存分配阶段，为节点的输出张量分配内存。这是为了存储节点计算的结果。通常，内存分配可以并行进行，以提高效率。
+
+//这些阶段可以根据硬件支持和节点依赖关系进行并行处理。例如，准备一个节点的输入数据可以同时进行，而同时执行多个节点的计算也是可能的。
+
+//节点完成和结果输出：一旦节点执行完成，其输出数据将被发送到下一个节点或返回给用户，取决于模型的结构。结果数据可能需要进一步处理或用于其他任务。
+
+ 
+
   int next_execution_plan_index_to_prepare_;
   // pipeline执行算子时下一个要分配内存node的下标
   int next_execution_plan_index_to_plan_allocation_; 
